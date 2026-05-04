@@ -1,16 +1,20 @@
+/* Simple pubsub client
+   - Connects to localhost:9000
+   - Read from stdin and send to server (commands: SUB, UNSUB, PUB)
+   - Print messages received from server
+   - Uses select() similar to other client files
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 5000
-#define BUF_SIZE 1024
+#include <sys/select.h>
 
 int main()
 {
@@ -21,23 +25,21 @@ int main()
         return 1;
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
-    server_addr.sin_port = htons(SERVER_PORT);
+    struct sockaddr_in saddr;
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    saddr.sin_port = htons(9000);
 
-    if (connect(client, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    if (connect(client, (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
     {
         perror("connect");
         close(client);
         return 1;
     }
 
-    printf("Da ket noi toi server %s:%d\n", SERVER_IP, SERVER_PORT);
-
     fd_set readfds;
-    char buf[BUF_SIZE];
+    char buf[2048];
 
     while (1)
     {
@@ -54,7 +56,22 @@ int main()
             break;
         }
 
-        // Có dữ liệu từ server
+        // input từ bàn phím: gửi lệnh tới server
+        if (FD_ISSET(STDIN_FILENO, &readfds))
+        {
+            if (fgets(buf, sizeof(buf), stdin) == NULL)
+                break;
+
+            // Gửi nguyên dòng tới server
+            int s = send(client, buf, strlen(buf), 0);
+            if (s < 0)
+            {
+                perror("send");
+                break;
+            }
+        }
+
+        // dữ liệu từ server
         if (FD_ISSET(client, &readfds))
         {
             int n = recv(client, buf, sizeof(buf) - 1, 0);
@@ -65,26 +82,12 @@ int main()
             }
             if (n == 0)
             {
-                printf("Server da dong ket noi.\n");
+                printf("Server disconnected.\n");
                 break;
             }
 
             buf[n] = '\0';
             printf("%s", buf);
-            fflush(stdout);
-        }
-
-        // Người dùng nhập từ bàn phím
-        if (FD_ISSET(STDIN_FILENO, &readfds))
-        {
-            if (fgets(buf, sizeof(buf), stdin) == NULL)
-                break;
-
-            if (send(client, buf, strlen(buf), 0) < 0)
-            {
-                perror("send");
-                break;
-            }
         }
     }
 
